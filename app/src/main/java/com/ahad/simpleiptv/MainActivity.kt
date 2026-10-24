@@ -8,6 +8,7 @@ import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -37,6 +38,9 @@ class MainActivity : Activity() {
     private lateinit var listView: ListView
     private lateinit var playerView: PlayerView
     private var player: ExoPlayer? = null
+    private lateinit var leftPanel: LinearLayout
+    private var fullscreen = false
+    private var currentIndex = 0
 
     private val prefs by lazy { getSharedPreferences("iptv", Context.MODE_PRIVATE) }
 
@@ -81,6 +85,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
+        leftPanel = left
         root.addView(left, LinearLayout.LayoutParams(dp(320), ViewGroup.LayoutParams.MATCH_PARENT))
 
         left.addView(TextView(this).apply {
@@ -104,7 +109,10 @@ class MainActivity : Activity() {
             selector = ColorDrawable(Color.parseColor("#553B82F6"))
             divider = null
             isFocusable = true
-            setOnItemClickListener { _, _, pos, _ -> play(pos) }
+            setOnItemClickListener { _, _, pos, _ ->
+                play(pos)
+                setFullscreen(true)
+            }
             setOnItemLongClickListener { _, _, pos, _ ->
                 confirmDelete(pos)
                 true
@@ -122,7 +130,7 @@ class MainActivity : Activity() {
             setOnClickListener { showImportPlaylist() }
         })
         left.addView(TextView(this).apply {
-            text = "Hold OK on a channel to delete it"
+            text = "Hold OK on a channel to delete it\nIn full screen: Up/Down = change channel, OK or Back = list"
             setTextColor(Color.parseColor("#8A94A6"))
             textSize = 12f
             gravity = Gravity.CENTER
@@ -131,8 +139,7 @@ class MainActivity : Activity() {
 
         playerView = PlayerView(this).apply {
             setBackgroundColor(Color.BLACK)
-            // Keep the controller hidden until the user presses a button.
-            controllerAutoShow = false
+            useController = false
         }
         root.addView(playerView, LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
@@ -207,10 +214,52 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------- Fullscreen ----------
+
+    private fun setFullscreen(on: Boolean) {
+        fullscreen = on
+        leftPanel.visibility = if (on) View.GONE else View.VISIBLE
+        if (on) {
+            playerView.requestFocus()
+        } else {
+            listView.setSelection(currentIndex)
+            listView.requestFocus()
+        }
+    }
+
+    private fun zap(delta: Int) {
+        if (channels.isEmpty()) return
+        val next = (currentIndex + delta + channels.size) % channels.size
+        play(next)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (fullscreen) {
+            val down = event.action == KeyEvent.ACTION_DOWN
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> {
+                    if (down) zap(-1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                    if (down) zap(1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_BACK -> {
+                    if (down) setFullscreen(false)
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     // ---------- Playback ----------
 
     private fun play(index: Int) {
         val ch = channels.getOrNull(index) ?: return
+        currentIndex = index
         prefs.edit().putInt("last", index).apply()
         val item = MediaItem.Builder()
             .setUri(ch.url)
